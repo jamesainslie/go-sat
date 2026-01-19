@@ -85,7 +85,7 @@ func TestEvaluateTalk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create segmenter: %v", err)
 	}
-	defer seg.Close()
+	defer func() { _ = seg.Close() }()
 
 	talk := &Talk{
 		ID:      "test",
