@@ -4,5 +4,10 @@
 *.onnx
 
 # Built binaries
+bin/
 sat-bench
 sat-cli
+
+# Coverage reports
+coverage.out
+coverage.html
