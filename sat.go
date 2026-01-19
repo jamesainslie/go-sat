@@ -12,6 +12,17 @@ import (
 	"github.com/jamesainslie/go-sat/tokenizer"
 )
 
+const (
+	// maxSeqLen is the maximum sequence length supported by the model.
+	// The model supports positions 0-513, so max is 514 tokens.
+	// We use 512 to leave margin for safety.
+	maxSeqLen = 512
+
+	// chunkOverlap is the number of overlapping tokens between chunks.
+	// This ensures boundary detection works properly at chunk boundaries.
+	chunkOverlap = 64
+)
+
 // Segmenter detects sentence boundaries using wtpsplit/SaT ONNX models.
 // It is safe for concurrent use.
 type Segmenter struct {
@@ -72,25 +83,10 @@ func (s *Segmenter) IsComplete(ctx context.Context, text string) (complete bool,
 		return false, 0.0, nil
 	}
 
-	// Prepare model input
-	inputIDs := make([]int64, len(tokens))
-	attentionMask := make([]int64, len(tokens))
-	for i, t := range tokens {
-		inputIDs[i] = int64(t.ID)
-		attentionMask[i] = 1
-	}
-
-	// Acquire session from pool
-	session, err := s.pool.Acquire(ctx)
+	// Get logits for all tokens, handling chunking if needed
+	logits, err := s.getLogits(ctx, tokens)
 	if err != nil {
 		return false, 0, err
-	}
-	defer s.pool.Release(session)
-
-	// Run inference
-	logits, err := session.Infer(ctx, inputIDs, attentionMask)
-	if err != nil {
-		return false, 0, fmt.Errorf("inference: %w", err)
 	}
 
 	// Check last token's boundary probability
@@ -113,25 +109,10 @@ func (s *Segmenter) Segment(ctx context.Context, text string) ([]string, error) 
 		return nil, nil
 	}
 
-	// Prepare model input
-	inputIDs := make([]int64, len(tokens))
-	attentionMask := make([]int64, len(tokens))
-	for i, t := range tokens {
-		inputIDs[i] = int64(t.ID)
-		attentionMask[i] = 1
-	}
-
-	// Acquire session from pool
-	session, err := s.pool.Acquire(ctx)
+	// Get logits for all tokens, handling chunking if needed
+	logits, err := s.getLogits(ctx, tokens)
 	if err != nil {
 		return nil, err
-	}
-	defer s.pool.Release(session)
-
-	// Run inference
-	logits, err := session.Infer(ctx, inputIDs, attentionMask)
-	if err != nil {
-		return nil, fmt.Errorf("inference: %w", err)
 	}
 
 	// Find boundaries using token byte offsets
@@ -163,6 +144,71 @@ func (s *Segmenter) Segment(ctx context.Context, text string) ([]string, error) 
 	}
 
 	return sentences, nil
+}
+
+// getLogits returns logits for all tokens, chunking if necessary.
+func (s *Segmenter) getLogits(ctx context.Context, tokens []tokenizer.TokenInfo) ([]float32, error) {
+	// Acquire session from pool
+	session, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.pool.Release(session)
+
+	// If sequence fits in one chunk, process directly
+	if len(tokens) <= maxSeqLen {
+		return s.inferChunk(ctx, session, tokens)
+	}
+
+	// Process in overlapping chunks
+	logits := make([]float32, len(tokens))
+	counts := make([]int, len(tokens)) // Track how many times each position was processed
+
+	stride := maxSeqLen - chunkOverlap
+	for start := 0; start < len(tokens); start += stride {
+		end := start + maxSeqLen
+		if end > len(tokens) {
+			end = len(tokens)
+		}
+
+		chunk := tokens[start:end]
+		chunkLogits, err := s.inferChunk(ctx, session, chunk)
+		if err != nil {
+			return nil, err
+		}
+
+		// Accumulate logits (for averaging in overlap regions)
+		for i, logit := range chunkLogits {
+			logits[start+i] += logit
+			counts[start+i]++
+		}
+
+		// Stop if we've reached the end
+		if end >= len(tokens) {
+			break
+		}
+	}
+
+	// Average logits in overlapping regions
+	for i := range logits {
+		if counts[i] > 1 {
+			logits[i] /= float32(counts[i])
+		}
+	}
+
+	return logits, nil
+}
+
+// inferChunk runs inference on a single chunk of tokens.
+func (s *Segmenter) inferChunk(ctx context.Context, session *inference.Session, tokens []tokenizer.TokenInfo) ([]float32, error) {
+	inputIDs := make([]int64, len(tokens))
+	attentionMask := make([]int64, len(tokens))
+	for i, t := range tokens {
+		inputIDs[i] = int64(t.ID)
+		attentionMask[i] = 1
+	}
+
+	return session.Infer(ctx, inputIDs, attentionMask)
 }
 
 // Close releases all resources.

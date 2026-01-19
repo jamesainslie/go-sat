@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 
@@ -23,8 +24,13 @@ var (
 )
 
 // initORT initializes ONNX Runtime environment once.
+// If ONNXRUNTIME_SHARED_LIBRARY_PATH is set, uses that library path.
 func initORT() error {
 	ortEnvOnce.Do(func() {
+		// Check for custom library path (required on macOS with homebrew)
+		if libPath := os.Getenv("ONNXRUNTIME_SHARED_LIBRARY_PATH"); libPath != "" {
+			ort.SetSharedLibraryPath(libPath)
+		}
 		ortEnvErr = ort.InitializeEnvironment()
 	})
 	return ortEnvErr
@@ -101,9 +107,21 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 	}
 	defer func() { _ = inputIDsTensor.Destroy() }()
 
-	attentionMaskTensor, err := ort.NewTensor(
+	// Convert attention_mask to float16 bytes
+	// Model expects attention_mask as float16, not int64
+	attentionMaskF16 := make([]byte, len(attentionMask)*2)
+	for i, v := range attentionMask {
+		// float16: 0.0 = 0x0000, 1.0 = 0x3C00 (little-endian: 0x00, 0x3C)
+		if v != 0 {
+			attentionMaskF16[i*2] = 0x00
+			attentionMaskF16[i*2+1] = 0x3C
+		}
+		// else: already zero
+	}
+	attentionMaskTensor, err := ort.NewCustomDataTensor(
 		ort.NewShape(batchSize, seqLen),
-		attentionMask,
+		attentionMaskF16,
+		ort.TensorElementDataTypeFloat16,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating attention_mask tensor: %w", err)
@@ -113,8 +131,20 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 	// Prepare inputs as Value slice
 	inputs := []ort.Value{inputIDsTensor, attentionMaskTensor}
 
-	// Prepare output slice - nil entries will be allocated by Run
-	outputs := []ort.Value{nil}
+	// Pre-allocate output tensor as float16 with shape [1, seqLen, 1]
+	// The model outputs float16 logits
+	outputData := make([]byte, seqLen*2) // seqLen * 1 * 2 bytes per float16
+	outputTensor, err := ort.NewCustomDataTensor(
+		ort.NewShape(batchSize, seqLen, 1),
+		outputData,
+		ort.TensorElementDataTypeFloat16,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating output tensor: %w", err)
+	}
+	defer func() { _ = outputTensor.Destroy() }()
+
+	outputs := []ort.Value{outputTensor}
 
 	// Run inference
 	err = s.session.Run(inputs, outputs)
@@ -122,23 +152,56 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 		return nil, fmt.Errorf("running inference: %w", err)
 	}
 
-	// Extract logits from output
-	if outputs[0] == nil {
-		return nil, fmt.Errorf("no output produced")
-	}
-	defer func() { _ = outputs[0].Destroy() }()
-
-	logitsTensor, ok := outputs[0].(*ort.Tensor[float32])
-	if !ok {
-		return nil, fmt.Errorf("unexpected output tensor type")
-	}
-
-	// Copy output data
+	// Convert float16 bytes to float32 logits
 	logits := make([]float32, seqLen)
-	outputData := logitsTensor.GetData()
-	copy(logits, outputData[:seqLen])
+	for i := int64(0); i < seqLen; i++ {
+		// Read float16 (2 bytes, little-endian)
+		low := uint16(outputData[i*2])
+		high := uint16(outputData[i*2+1])
+		f16bits := low | (high << 8)
+		logits[i] = float16ToFloat32(f16bits)
+	}
 
 	return logits, nil
+}
+
+// float16ToFloat32 converts a 16-bit float to 32-bit float.
+func float16ToFloat32(f16 uint16) float32 {
+	// Extract components
+	sign := (f16 >> 15) & 0x1
+	exp := (f16 >> 10) & 0x1F
+	frac := f16 & 0x3FF
+
+	if exp == 0 {
+		if frac == 0 {
+			// Zero
+			return 0.0
+		}
+		// Denormalized number
+		exp = 1
+		for frac&0x400 == 0 {
+			frac <<= 1
+			exp--
+		}
+		frac &= 0x3FF
+	} else if exp == 31 {
+		// Inf or NaN
+		if frac == 0 {
+			if sign == 1 {
+				return float32(math.Inf(-1))
+			}
+			return float32(math.Inf(1))
+		}
+		return float32(math.NaN())
+	}
+
+	// Convert to float32 format
+	f32exp := uint32(exp-15+127) << 23
+	f32frac := uint32(frac) << 13
+	f32sign := uint32(sign) << 31
+
+	f32bits := f32sign | f32exp | f32frac
+	return math.Float32frombits(f32bits)
 }
 
 // Close releases ONNX resources.

@@ -1,1 +1,8 @@
 .worktrees/
+
+# Model files (download separately)
+*.onnx
+
+# Built binaries
+sat-bench
+sat-cli
