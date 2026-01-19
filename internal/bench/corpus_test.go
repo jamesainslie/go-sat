@@ -1,6 +1,8 @@
 package bench
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -112,5 +114,35 @@ func TestParseSentences(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoadTalk(t *testing.T) {
+	// Create temp file
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test_talk.txt")
+	content := `# Source: https://example.com
+# Speaker: Test Speaker
+# Title: Test Title
+
+Hello world. How are you?`
+
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	talk, err := LoadTalk(path)
+	if err != nil {
+		t.Fatalf("LoadTalk() error = %v", err)
+	}
+
+	if talk.ID != "test_talk" {
+		t.Errorf("ID = %q, want %q", talk.ID, "test_talk")
+	}
+	if talk.Speaker != "Test Speaker" {
+		t.Errorf("Speaker = %q, want %q", talk.Speaker, "Test Speaker")
+	}
+	if len(talk.Sentences) != 2 {
+		t.Errorf("got %d sentences, want 2", len(talk.Sentences))
 	}
 }

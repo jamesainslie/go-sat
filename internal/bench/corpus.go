@@ -5,6 +5,8 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -123,4 +125,39 @@ func ParseSentences(text string) []Sentence {
 	}
 
 	return sentences
+}
+
+// Talk represents a loaded transcript with parsed sentences.
+type Talk struct {
+	ID        string     // filename without extension
+	Source    string     // TED URL
+	Speaker   string
+	Title     string
+	RawText   string     // body text
+	Sentences []Sentence
+}
+
+// LoadTalk loads and parses a transcript file.
+func LoadTalk(path string) (*Talk, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	header, body, err := ParseHeader(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse header: %w", err)
+	}
+
+	base := filepath.Base(path)
+	id := strings.TrimSuffix(base, filepath.Ext(base))
+
+	return &Talk{
+		ID:        id,
+		Source:    header.Source,
+		Speaker:   header.Speaker,
+		Title:     header.Title,
+		RawText:   body,
+		Sentences: ParseSentences(body),
+	}, nil
 }
