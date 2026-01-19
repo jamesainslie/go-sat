@@ -11,8 +11,10 @@ Pure Go library for sentence boundary detection using [wtpsplit/SaT](https://git
 - Sentence boundary detection using neural models
 - Sentence completeness checking with confidence scores
 - Text segmentation into sentences
+- Automatic chunking for long texts (handles sequences > 512 tokens)
 - Thread-safe with configurable session pooling
 - Pure Go tokenizer (SentencePiece Unigram algorithm)
+- Benchmark tool for evaluating model accuracy
 
 ## Requirements
 
@@ -33,6 +35,7 @@ The library requires the ONNX Runtime shared library. See the [onnxruntime_go in
 
 ```bash
 brew install onnxruntime
+export ONNXRUNTIME_SHARED_LIBRARY_PATH="$(brew --prefix onnxruntime)/lib/libonnxruntime.dylib"
 ```
 
 **Linux:**
@@ -52,11 +55,12 @@ Download the required model files from HuggingFace:
 curl -L -o sentencepiece.bpe.model \
   "https://huggingface.co/xlm-roberta-base/resolve/main/sentencepiece.bpe.model"
 
-# SaT model (choose one)
-# sat-1l-sm: Fast, suitable for most use cases
-curl -L -o model_optimized.onnx \
-  "https://huggingface.co/segment-any-text/sat-1l-sm/resolve/main/model_optimized.onnx"
+# SaT model (sat-1l-sm: fast, suitable for most use cases)
+curl -L -o model.onnx \
+  "https://huggingface.co/segment-any-text/sat-1l-sm/resolve/main/model.onnx"
 ```
+
+**Note:** Use `model.onnx`, not `model_optimized.onnx`. The optimized model uses different input tensor types.
 
 ## Usage
 
@@ -74,7 +78,7 @@ import (
 )
 
 func main() {
-    seg, err := sat.New("model_optimized.onnx", "sentencepiece.bpe.model")
+    seg, err := sat.New("model.onnx", "sentencepiece.bpe.model")
     if err != nil {
         log.Fatal(err)
     }
@@ -112,25 +116,31 @@ seg, err := sat.New(modelPath, tokenizerPath,
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Segmenter                            │
-│  ┌─────────────────┐    ┌─────────────────────────────────┐ │
-│  │   Tokenizer     │    │        Session Pool             │ │
-│  │  (SentencePiece │    │  ┌─────────┐ ┌─────────┐       │ │
-│  │   Unigram)      │    │  │ Session │ │ Session │ ...   │ │
-│  └─────────────────┘    │  └─────────┘ └─────────┘       │ │
-│                         └─────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+### Components
 
-**Data Flow:**
+| Component | Description |
+|-----------|-------------|
+| **Segmenter** | Main API - coordinates tokenization, inference, and boundary detection |
+| **Tokenizer** | Pure Go SentencePiece implementation (Unigram algorithm with Viterbi decoding) |
+| **Session Pool** | Thread-safe pool of ONNX Runtime sessions for concurrent inference |
+| **Inference** | Handles float16 tensor conversion and model execution |
+
+### Data Flow
 
 1. Text input normalized (whitespace handling, SentencePiece prefix)
 2. Tokenized using Viterbi dynamic programming algorithm
 3. Token IDs remapped from SentencePiece to HuggingFace convention
-4. ONNX model inference produces per-token boundary logits
-5. Sigmoid applied; positions above threshold mark sentence boundaries
+4. For long texts (>512 tokens), split into overlapping chunks (64 token overlap)
+5. ONNX model inference produces per-token boundary logits (float16)
+6. Logits converted to float32, averaged in overlap regions
+7. Sigmoid applied; positions above threshold mark sentence boundaries
+
+### Model Requirements
+
+The SaT model expects:
+- `input_ids`: int64 tensor of token IDs
+- `attention_mask`: float16 tensor (1.0 for valid tokens)
+- Output: float16 logits with shape [batch, sequence, 1]
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation.
 
@@ -145,9 +155,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical document
 
 See [docs/API.md](docs/API.md) for detailed API documentation with examples.
 
-## CLI Tool
+## CLI Tools
 
-A command-line tool is provided for testing and debugging:
+### sat-cli
+
+Command-line tool for testing and debugging:
 
 ```bash
 go install github.com/jamesainslie/go-sat/cmd/sat-cli@latest
@@ -158,6 +170,52 @@ sat-cli -model model.onnx -tokenizer tokenizer.model "Hello world."
 # Segment text into sentences
 sat-cli -model model.onnx -tokenizer tokenizer.model -mode segment "Hello. World."
 ```
+
+### sat-bench
+
+Benchmark tool for evaluating model accuracy against a test corpus:
+
+```bash
+go install github.com/jamesainslie/go-sat/cmd/sat-bench@latest
+
+# Evaluate at a single threshold
+sat-bench -model model.onnx -tokenizer tokenizer.model -corpus testdata/ted -threshold 0.5
+
+# Run threshold sweep to find optimal settings
+sat-bench -model model.onnx -tokenizer tokenizer.model -corpus testdata/ted -sweep
+```
+
+Example output:
+
+```
+Precision: 0.44  Recall: 0.52  F1: 0.48  Weighted: 0.48
+(TP: 376, FP: 454, FN: 348)
+```
+
+See [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for detailed guidance on interpreting results.
+
+## Building
+
+The project uses [Stave](https://github.com/yaklabco/stave) for build automation:
+
+```bash
+# Install stave
+go install github.com/yaklabco/stave/cmd/stave@latest
+
+# Build everything (lint, test, build)
+stave
+
+# Quick shortcuts
+stave b          # Build binaries
+stave t          # Run tests
+stave l          # Run linter
+
+# Run benchmarks (auto-configures ONNX runtime on macOS)
+stave bench:run
+stave bench:sweep
+```
+
+See `stave --list` for all available targets.
 
 ## Performance
 
