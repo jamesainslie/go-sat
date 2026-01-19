@@ -47,3 +47,28 @@ func TestNew_FileNotFound(t *testing.T) {
 		t.Error("expected error for non-existent file")
 	}
 }
+
+func TestTokenizer_EncodeIDs_Simple(t *testing.T) {
+	tok, err := New("../testdata/sentencepiece.bpe.model")
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer func() {
+		if err := tok.Close(); err != nil {
+			t.Errorf("Close failed: %v", err)
+		}
+	}()
+
+	// Simple case - just verify we get some tokens
+	ids := tok.EncodeIDs("Hello")
+	if len(ids) == 0 {
+		t.Error("expected non-empty token IDs")
+	}
+
+	// All IDs should be valid
+	for i, id := range ids {
+		if id < 0 || int(id) >= tok.VocabSize() {
+			t.Errorf("token %d: invalid ID %d", i, id)
+		}
+	}
+}
