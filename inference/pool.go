@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -47,7 +48,7 @@ func (p *Pool) Acquire(ctx context.Context) (*Session, error) {
 	select {
 	case session, ok := <-p.sessions:
 		if !ok {
-			return nil, fmt.Errorf("pool is closed")
+			return nil, ErrPoolClosed
 		}
 		return session, nil
 	case <-ctx.Done():
@@ -88,14 +89,14 @@ func (p *Pool) Close() error {
 
 	close(p.sessions)
 
-	var lastErr error
+	var errs []error
 	for session := range p.sessions {
 		if err := session.Close(); err != nil {
-			lastErr = err
+			errs = append(errs, err)
 		}
 	}
 
-	return lastErr
+	return errors.Join(errs...)
 }
 
 // Size returns the pool size.

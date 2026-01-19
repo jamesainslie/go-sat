@@ -66,8 +66,9 @@ func (t *Tokenizer) Encode(text string) []TokenInfo {
 
 		// If no valid token found, use unknown token for single character
 		if best[i] == negInf {
-			// Try byte fallback or unknown token
-			best[i] = best[i-1] + float64(t.scores[t.idToPiece[t.unkID]])
+			// Use <unk> token score (convert HF ID to SentencePiece index for lookup)
+			unkSPIndex := t.hfIDToSPIndex(t.unkID)
+			best[i] = best[i-1] + float64(t.scores[t.idToPiece[unkSPIndex]])
 			parent[i] = i - 1
 			tokenAt[i] = string(runes[i-1 : i])
 		}

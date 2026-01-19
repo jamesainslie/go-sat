@@ -3,11 +3,18 @@ package inference
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
+)
+
+// Sentinel errors for closed resources.
+var (
+	ErrSessionClosed = errors.New("inference: session is closed")
+	ErrPoolClosed    = errors.New("inference: pool is closed")
 )
 
 var (
@@ -78,7 +85,7 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 	defer s.mu.Unlock()
 
 	if s.closed {
-		return nil, fmt.Errorf("session is closed")
+		return nil, ErrSessionClosed
 	}
 
 	batchSize := int64(1)
