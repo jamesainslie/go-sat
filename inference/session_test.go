@@ -35,7 +35,7 @@ func TestNewSession(t *testing.T) {
 		}
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	if session == nil {
 		t.Error("expected non-nil session")
@@ -57,7 +57,7 @@ func TestSession_Infer(t *testing.T) {
 		}
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// Test inference with sample input
 	// These are placeholder token IDs - in real usage they come from the tokenizer
@@ -94,7 +94,7 @@ func TestSession_Infer_ContextCancellation(t *testing.T) {
 		}
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// Create an already-cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -124,7 +124,7 @@ func TestSession_Infer_ContextTimeout(t *testing.T) {
 		}
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// Create an already-expired context
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)

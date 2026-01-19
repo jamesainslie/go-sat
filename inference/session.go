@@ -46,7 +46,7 @@ func NewSession(modelPath string) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating session options: %w", err)
 	}
-	defer options.Destroy()
+	defer func() { _ = options.Destroy() }() // Cleanup error doesn't affect success
 
 	// Define input/output names (from model inspection)
 	inputNames := []string{"input_ids", "attention_mask"}
@@ -92,7 +92,7 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("creating input_ids tensor: %w", err)
 	}
-	defer inputIDsTensor.Destroy()
+	defer func() { _ = inputIDsTensor.Destroy() }()
 
 	attentionMaskTensor, err := ort.NewTensor(
 		ort.NewShape(batchSize, seqLen),
@@ -101,7 +101,7 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("creating attention_mask tensor: %w", err)
 	}
-	defer attentionMaskTensor.Destroy()
+	defer func() { _ = attentionMaskTensor.Destroy() }()
 
 	// Prepare inputs as Value slice
 	inputs := []ort.Value{inputIDsTensor, attentionMaskTensor}
@@ -119,7 +119,7 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 	if outputs[0] == nil {
 		return nil, fmt.Errorf("no output produced")
 	}
-	defer outputs[0].Destroy()
+	defer func() { _ = outputs[0].Destroy() }()
 
 	logitsTensor, ok := outputs[0].(*ort.Tensor[float32])
 	if !ok {
@@ -129,9 +129,7 @@ func (s *Session) Infer(ctx context.Context, inputIDs, attentionMask []int64) ([
 	// Copy output data
 	logits := make([]float32, seqLen)
 	outputData := logitsTensor.GetData()
-	for i := int64(0); i < seqLen; i++ {
-		logits[i] = outputData[i]
-	}
+	copy(logits, outputData[:seqLen])
 
 	return logits, nil
 }
