@@ -2,6 +2,7 @@ package tokenizer
 
 import (
 	"fmt"
+	"strings"
 
 	pb "github.com/jamesainslie/go-sat/internal/proto"
 )
@@ -95,6 +96,29 @@ func (t *Tokenizer) spIndexToHFID(spIndex int32) int32 {
 	}
 }
 
+// hfIDToSPIndex converts a HuggingFace XLM-RoBERTa token ID to a SentencePiece index.
+//
+// Mapping (reverse of spIndexToHFID):
+//   - HF[0] (<s>)   -> SP[1]
+//   - HF[1] (<pad>) -> -1 (not in SentencePiece)
+//   - HF[2] (</s>)  -> SP[2]
+//   - HF[3] (<unk>) -> SP[0]
+//   - HF[n] (n>=4)  -> SP[n-1] (normal tokens shifted back by 1)
+func (t *Tokenizer) hfIDToSPIndex(hfID int32) int32 {
+	switch hfID {
+	case 0: // <s>
+		return 1
+	case 1: // <pad> - not in SentencePiece
+		return -1
+	case 2: // </s>
+		return 2
+	case 3: // <unk>
+		return 0
+	default: // normal tokens: shift back by 1
+		return hfID - 1
+	}
+}
+
 // Close releases tokenizer resources.
 func (t *Tokenizer) Close() error {
 	return nil
@@ -117,3 +141,34 @@ func (t *Tokenizer) EOSID() int32 { return t.eosID }
 
 // UnkID returns the unknown token ID.
 func (t *Tokenizer) UnkID() int32 { return t.unkID }
+
+// Decode converts token IDs back to text.
+func (t *Tokenizer) Decode(ids []int32) string {
+	var builder strings.Builder
+
+	for _, hfID := range ids {
+		// Convert HuggingFace ID to SentencePiece index
+		spIndex := t.hfIDToSPIndex(hfID)
+
+		// Skip invalid indices (e.g., <pad> which returns -1)
+		if spIndex < 0 || int(spIndex) >= len(t.idToPiece) {
+			continue
+		}
+
+		piece := t.idToPiece[spIndex]
+
+		// Skip control tokens
+		if t.pieceToType[piece] == pb.ModelProto_SentencePiece_CONTROL {
+			continue
+		}
+
+		builder.WriteString(piece)
+	}
+
+	// Convert ▁ back to spaces and trim leading space
+	result := builder.String()
+	result = strings.ReplaceAll(result, string(sentencePieceSpace), " ")
+	result = strings.TrimPrefix(result, " ")
+
+	return result
+}

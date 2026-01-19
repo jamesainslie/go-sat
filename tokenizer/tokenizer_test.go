@@ -100,7 +100,11 @@ func TestTokenizer_EncodeIDs_Golden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
-	defer tok.Close()
+	defer func() {
+		if err := tok.Close(); err != nil {
+			t.Errorf("Close failed: %v", err)
+		}
+	}()
 
 	cases := loadGoldenCases(t)
 	for _, tc := range cases {
@@ -125,5 +129,33 @@ func TestTokenizer_EncodeIDs_Golden(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTokenizer_Decode(t *testing.T) {
+	tok, err := New("../testdata/sentencepiece.bpe.model")
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer func() {
+		if err := tok.Close(); err != nil {
+			t.Errorf("Close failed: %v", err)
+		}
+	}()
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Hello", "Hello"},
+		{"Hello world", "Hello world"},
+	}
+
+	for _, tc := range tests {
+		ids := tok.EncodeIDs(tc.input)
+		got := tok.Decode(ids)
+		if got != tc.expected {
+			t.Errorf("Decode(Encode(%q)) = %q, want %q", tc.input, got, tc.expected)
+		}
 	}
 }
