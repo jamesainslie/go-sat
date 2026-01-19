@@ -146,3 +146,34 @@ Hello world. How are you?`
 		t.Errorf("got %d sentences, want 2", len(talk.Sentences))
 	}
 }
+
+func TestLoadCorpus(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create two test files
+	for _, name := range []string{"talk1.txt", "talk2.txt"} {
+		content := `# Source: https://example.com
+# Speaker: Speaker
+# Title: Title
+
+Hello.`
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create a non-txt file that should be ignored
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Readme"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	talks, err := LoadCorpus(dir)
+	if err != nil {
+		t.Fatalf("LoadCorpus() error = %v", err)
+	}
+
+	if len(talks) != 2 {
+		t.Errorf("got %d talks, want 2", len(talks))
+	}
+}

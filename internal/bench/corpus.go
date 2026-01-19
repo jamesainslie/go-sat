@@ -161,3 +161,30 @@ func LoadTalk(path string) (*Talk, error) {
 		Sentences: ParseSentences(body),
 	}, nil
 }
+
+// LoadCorpus loads all .txt transcript files from a directory.
+func LoadCorpus(dir string) ([]*Talk, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read dir: %w", err)
+	}
+
+	var talks []*Talk
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if filepath.Ext(entry.Name()) != ".txt" {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		talk, err := LoadTalk(path)
+		if err != nil {
+			return nil, fmt.Errorf("loading %s: %w", entry.Name(), err)
+		}
+		talks = append(talks, talk)
+	}
+
+	return talks, nil
+}
