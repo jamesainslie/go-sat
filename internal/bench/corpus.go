@@ -3,6 +3,7 @@ package bench
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -162,7 +163,8 @@ func LoadTalk(path string) (*Talk, error) {
 	}, nil
 }
 
-// LoadCorpus loads all .txt transcript files from a directory.
+// LoadCorpus loads transcript files from a directory.
+// Supports both .txt files (heuristic parsing) and .json files (gold-standard).
 func LoadCorpus(dir string) ([]*Talk, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -174,12 +176,20 @@ func LoadCorpus(dir string) ([]*Talk, error) {
 		if entry.IsDir() {
 			continue
 		}
-		if filepath.Ext(entry.Name()) != ".txt" {
+
+		ext := filepath.Ext(entry.Name())
+		path := filepath.Join(dir, entry.Name())
+
+		var talk *Talk
+		switch ext {
+		case ".txt":
+			talk, err = LoadTalk(path)
+		case ".json":
+			talk, err = LoadJSONCorpus(path)
+		default:
 			continue
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		talk, err := LoadTalk(path)
 		if err != nil {
 			return nil, fmt.Errorf("loading %s: %w", entry.Name(), err)
 		}
@@ -187,4 +197,73 @@ func LoadCorpus(dir string) ([]*Talk, error) {
 	}
 
 	return talks, nil
+}
+
+// JSONCorpus represents a corpus file with gold-standard sentence boundaries.
+type JSONCorpus struct {
+	Name       string `json:"name"`
+	Source     string `json:"source"`
+	Text       string `json:"text"`
+	Sentences  int    `json:"sentences"`
+	Boundaries []int  `json:"boundaries"` // Character offsets where sentences end
+}
+
+// LoadJSONCorpus loads a JSON corpus file with gold-standard boundaries.
+func LoadJSONCorpus(path string) (*Talk, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	var corpus JSONCorpus
+	if err := json.Unmarshal(data, &corpus); err != nil {
+		return nil, fmt.Errorf("unmarshal json: %w", err)
+	}
+
+	// Convert boundaries to sentences
+	sentences := boundariesToSentences(corpus.Text, corpus.Boundaries)
+
+	base := filepath.Base(path)
+	id := strings.TrimSuffix(base, filepath.Ext(base))
+
+	return &Talk{
+		ID:        id,
+		Source:    corpus.Source,
+		Speaker:   corpus.Name,
+		Title:     corpus.Name,
+		RawText:   corpus.Text,
+		Sentences: sentences,
+	}, nil
+}
+
+// boundariesToSentences converts boundary offsets to Sentence structs.
+func boundariesToSentences(text string, boundaries []int) []Sentence {
+	if len(boundaries) == 0 {
+		return nil
+	}
+
+	sentences := make([]Sentence, 0, len(boundaries))
+	start := 0
+
+	for _, end := range boundaries {
+		if end > len(text) {
+			end = len(text)
+		}
+		if start >= end {
+			continue
+		}
+
+		sentences = append(sentences, Sentence{
+			Text:  strings.TrimSpace(text[start:end]),
+			Start: start,
+			End:   end,
+		})
+		start = end
+		// Skip any whitespace after boundary
+		for start < len(text) && (text[start] == ' ' || text[start] == '\n') {
+			start++
+		}
+	}
+
+	return sentences
 }

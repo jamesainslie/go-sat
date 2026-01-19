@@ -178,21 +178,22 @@ Benchmark tool for evaluating model accuracy against a test corpus:
 ```bash
 go install github.com/jamesainslie/go-sat/cmd/sat-bench@latest
 
-# Evaluate at a single threshold
-sat-bench -model model.onnx -tokenizer tokenizer.model -corpus testdata/ted -threshold 0.5
+# Evaluate against UD-EWT gold-standard corpus (recommended)
+./scripts/fetch-ud-ewt.sh && go run ./scripts/process-ud-ewt.go
+sat-bench -model model.onnx -tokenizer tokenizer.model -corpus testdata/ud-ewt-test -tolerance 10 -sweep
 
-# Run threshold sweep to find optimal settings
-sat-bench -model model.onnx -tokenizer tokenizer.model -corpus testdata/ted -sweep
+# Or evaluate against TED transcripts
+sat-bench -model model.onnx -tokenizer tokenizer.model -corpus testdata/ted -threshold 0.025
 ```
 
-Example output:
+Example output (UD-EWT test set):
 
 ```
-Precision: 0.44  Recall: 0.52  F1: 0.48  Weighted: 0.48
-(TP: 376, FP: 454, FN: 348)
+Precision: 0.87  Recall: 0.80  F1: 0.84  Weighted: 0.84
+(TP: 1662, FP: 239, FN: 415)
 ```
 
-See [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for detailed guidance on interpreting results.
+See [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for detailed guidance on interpreting results and corpus formats.
 
 ## Building
 

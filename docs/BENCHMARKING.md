@@ -196,14 +196,72 @@ sat-3l.onnx                    0.030    0.92     0.93
 
 ## Corpus Format
 
-The benchmark expects transcript files in the corpus directory with this format:
+The benchmark supports two corpus formats:
+
+### Text Format (.txt)
+
+Traditional transcript files with heuristic sentence boundary parsing:
 
 ```
 # Source: https://www.ted.com/talks/example
 # Speaker: Speaker Name
-# Duration: 19:24
+# Title: Talk Title
 
 First sentence. Second sentence! Third sentence?
 ```
 
-Ground truth boundaries are extracted from sentence-ending punctuation (`.`, `!`, `?`) followed by whitespace or end of file.
+Ground truth boundaries are extracted from sentence-ending punctuation (`.`, `!`, `?`) followed by whitespace or end of file. This format is best for quick tests but may have ambiguous boundaries.
+
+### JSON Format (.json) - Recommended
+
+Gold-standard annotated corpus with exact sentence boundary positions:
+
+```json
+{
+  "name": "UD-EWT-test",
+  "source": "https://github.com/UniversalDependencies/UD_English-EWT",
+  "text": "First sentence. Second sentence!",
+  "sentences": 2,
+  "boundaries": [16, 32]
+}
+```
+
+The `boundaries` array contains character offsets where each sentence ends. This format provides accurate ground truth for rigorous evaluation.
+
+## Available Corpora
+
+### UD-EWT (Recommended)
+
+The [Universal Dependencies English Web Treebank](https://github.com/UniversalDependencies/UD_English-EWT) provides gold-standard sentence boundaries:
+
+- 16,622 sentences from web media (blogs, emails, reviews, forums)
+- Professional linguistic annotation
+- Available splits: train, dev, test
+
+To download and prepare:
+
+```bash
+./scripts/fetch-ud-ewt.sh
+go run ./scripts/process-ud-ewt.go
+```
+
+To benchmark:
+
+```bash
+sat-bench -model model.onnx -tokenizer tokenizer.model \
+    -corpus testdata/ud-ewt-test -tolerance 10
+```
+
+**Note:** Use `-tolerance 10` for UD-EWT to account for tokenization differences between the model's SentencePiece tokenizer and the corpus annotation conventions.
+
+### Expected Results
+
+| Corpus | Tolerance | Optimal Threshold | F1 |
+|--------|-----------|-------------------|-----|
+| UD-EWT (test) | 10 | 0.19-0.25 | 0.83-0.84 |
+| TED transcripts | 3 | 0.025 | 0.48 |
+
+The lower F1 on TED transcripts is expected because:
+- Spoken language differs from written text
+- Transcripts use heuristic boundary detection
+- Domain mismatch with model training data

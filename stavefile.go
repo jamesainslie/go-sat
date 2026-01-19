@@ -281,6 +281,36 @@ func (Bench) Sweep() error {
 	)
 }
 
+// EWT runs the benchmark against the UD-EWT gold-standard corpus.
+// Use this for rigorous evaluation with professional linguistic annotations.
+func (Bench) EWT() error {
+	st.Deps(Build_Bench)
+	setupONNXEnv()
+
+	// Ensure corpus exists
+	if _, err := os.Stat("testdata/ud-ewt/test.json"); err != nil {
+		fmt.Println("UD-EWT corpus not found. Run: ./scripts/fetch-ud-ewt.sh && go run ./scripts/process-ud-ewt.go")
+		return fmt.Errorf("corpus not found: %w", err)
+	}
+
+	modelPath := os.Getenv("SAT_MODEL")
+	if modelPath == "" {
+		modelPath = "model.onnx"
+	}
+	tokenizerPath := os.Getenv("SAT_TOKENIZER")
+	if tokenizerPath == "" {
+		tokenizerPath = "testdata/sentencepiece.bpe.model"
+	}
+
+	return sh.RunV("./bin/sat-bench",
+		"-model", modelPath,
+		"-tokenizer", tokenizerPath,
+		"-corpus", "testdata/ud-ewt-test",
+		"-tolerance", "10",
+		"-sweep",
+	)
+}
+
 // CI runs the full CI pipeline (lint, test, build).
 func CI() error {
 	st.Deps(Init)

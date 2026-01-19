@@ -11,3 +11,9 @@ sat-cli
 # Coverage reports
 coverage.out
 coverage.html
+
+# Downloaded/generated corpus files (can be regenerated with scripts)
+testdata/gutenberg/*.txt
+testdata/ud-ewt/*.conllu
+testdata/ud-ewt/*.json
+testdata/ud-ewt-test/

@@ -146,6 +146,54 @@ func (s *Segmenter) Segment(ctx context.Context, text string) ([]string, error) 
 	return sentences, nil
 }
 
+// SegmentWithBoundaries splits text into sentences and returns boundary positions.
+// Boundaries are character offsets where each sentence ends in the original text.
+func (s *Segmenter) SegmentWithBoundaries(ctx context.Context, text string) (sentences []string, boundaries []int, err error) {
+	if text == "" {
+		return nil, nil, nil
+	}
+
+	// Tokenize
+	tokens := s.tokenizer.Encode(text)
+	if len(tokens) == 0 {
+		return nil, nil, nil
+	}
+
+	// Get logits for all tokens, handling chunking if needed
+	logits, err := s.getLogits(ctx, tokens)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Find boundaries using token byte offsets
+	for i, logit := range logits {
+		if sigmoid(logit) > s.threshold {
+			if i < len(tokens) {
+				boundaries = append(boundaries, tokens[i].End)
+			}
+		}
+	}
+
+	// Split text at boundaries
+	if len(boundaries) == 0 {
+		return []string{text}, []int{len(text)}, nil
+	}
+
+	start := 0
+	for _, end := range boundaries {
+		if end > start && end <= len(text) {
+			sentences = append(sentences, text[start:end])
+			start = end
+		}
+	}
+	if start < len(text) {
+		sentences = append(sentences, text[start:])
+		boundaries = append(boundaries, len(text))
+	}
+
+	return sentences, boundaries, nil
+}
+
 // getLogits returns logits for all tokens, chunking if necessary.
 func (s *Segmenter) getLogits(ctx context.Context, tokens []tokenizer.TokenInfo) ([]float32, error) {
 	// Acquire session from pool
