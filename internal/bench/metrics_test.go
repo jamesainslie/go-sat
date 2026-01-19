@@ -1,6 +1,12 @@
 package bench
 
-import "testing"
+import (
+	"context"
+	"os"
+	"testing"
+
+	sat "github.com/jamesainslie/go-sat"
+)
 
 func TestEvaluate(t *testing.T) {
 	tests := []struct {
@@ -65,5 +71,39 @@ func TestEvaluate(t *testing.T) {
 				t.Errorf("FalseNegatives = %d, want %d", got.FalseNegatives, tt.wantFN)
 			}
 		})
+	}
+}
+
+func TestEvaluateTalk(t *testing.T) {
+	modelPath := os.Getenv("SAT_MODEL_PATH")
+	tokenizerPath := os.Getenv("SAT_TOKENIZER_PATH")
+	if modelPath == "" || tokenizerPath == "" {
+		t.Skip("SAT_MODEL_PATH and SAT_TOKENIZER_PATH not set")
+	}
+
+	seg, err := sat.New(modelPath, tokenizerPath)
+	if err != nil {
+		t.Fatalf("failed to create segmenter: %v", err)
+	}
+	defer seg.Close()
+
+	talk := &Talk{
+		ID:      "test",
+		RawText: "Hello world. How are you?",
+		Sentences: []Sentence{
+			{Text: "Hello world.", Start: 0, End: 12},
+			{Text: "How are you?", Start: 13, End: 25},
+		},
+	}
+
+	cfg := DefaultConfig()
+	metrics, err := EvaluateTalk(context.Background(), seg, talk, cfg)
+	if err != nil {
+		t.Fatalf("EvaluateTalk() error = %v", err)
+	}
+
+	// Should get reasonable precision/recall on simple sentences
+	if metrics.Precision < 0.5 {
+		t.Errorf("Precision = %v, want >= 0.5", metrics.Precision)
 	}
 }

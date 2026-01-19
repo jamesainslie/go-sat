@@ -1,5 +1,11 @@
 package bench
 
+import (
+	"context"
+
+	sat "github.com/jamesainslie/go-sat"
+)
+
 // Config holds evaluation parameters.
 type Config struct {
 	Threshold       float32
@@ -78,4 +84,29 @@ func Evaluate(predicted, truth []int, cfg Config) Metrics {
 	}
 
 	return m
+}
+
+// EvaluateTalk runs segmentation on a talk and evaluates against ground truth.
+func EvaluateTalk(ctx context.Context, seg *sat.Segmenter, talk *Talk, cfg Config) (Metrics, error) {
+	// Get predicted boundaries
+	sentences, err := seg.Segment(ctx, talk.RawText)
+	if err != nil {
+		return Metrics{}, err
+	}
+
+	// Convert to boundary positions (end of each sentence)
+	var predicted []int
+	pos := 0
+	for _, s := range sentences {
+		pos += len(s)
+		predicted = append(predicted, pos)
+	}
+
+	// Get ground truth boundaries
+	var truth []int
+	for _, s := range talk.Sentences {
+		truth = append(truth, s.End)
+	}
+
+	return Evaluate(predicted, truth, cfg), nil
 }
