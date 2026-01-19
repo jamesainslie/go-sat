@@ -215,10 +215,33 @@ func (Proto) Generate() error {
 // Bench namespace for benchmark-related targets.
 type Bench st.Namespace
 
+// setupONNXEnv ensures ONNXRUNTIME_SHARED_LIBRARY_PATH is set for macOS.
+// On macOS with homebrew, the library is libonnxruntime.dylib, not onnxruntime.so.
+func setupONNXEnv() {
+	if os.Getenv("ONNXRUNTIME_SHARED_LIBRARY_PATH") != "" {
+		return // Already set
+	}
+
+	if runtime.GOOS == "darwin" {
+		// Try homebrew location
+		brewPrefix, err := sh.Output("brew", "--prefix", "onnxruntime")
+		if err == nil && brewPrefix != "" {
+			libPath := strings.TrimSpace(brewPrefix) + "/lib/libonnxruntime.dylib"
+			if _, err := os.Stat(libPath); err == nil {
+				os.Setenv("ONNXRUNTIME_SHARED_LIBRARY_PATH", libPath)
+				if st.Verbose() {
+					fmt.Printf("Set ONNXRUNTIME_SHARED_LIBRARY_PATH=%s\n", libPath)
+				}
+			}
+		}
+	}
+}
+
 // Run runs the benchmark tool against the test corpus.
 // Requires model.onnx and testdata/sentencepiece.bpe.model to exist.
 func (Bench) Run() error {
 	st.Deps(Build_Bench)
+	setupONNXEnv()
 
 	modelPath := os.Getenv("SAT_MODEL")
 	if modelPath == "" {
@@ -239,6 +262,7 @@ func (Bench) Run() error {
 // Sweep runs a threshold sweep to find optimal parameters.
 func (Bench) Sweep() error {
 	st.Deps(Build_Bench)
+	setupONNXEnv()
 
 	modelPath := os.Getenv("SAT_MODEL")
 	if modelPath == "" {
