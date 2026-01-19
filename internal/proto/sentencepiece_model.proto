@@ -1,0 +1,46 @@
+syntax = "proto2";
+
+package sentencepiece;
+
+option go_package = "github.com/jamesainslie/go-sat/internal/proto";
+
+message TrainerSpec {
+  enum ModelType {
+    UNIGRAM = 1;
+    BPE = 2;
+    WORD = 3;
+    CHAR = 4;
+  }
+  optional ModelType model_type = 3 [default = UNIGRAM];
+  optional string unk_piece = 10 [default = "<unk>"];
+  optional string bos_piece = 11 [default = "<s>"];
+  optional string eos_piece = 12 [default = "</s>"];
+  optional string pad_piece = 13 [default = "<pad>"];
+}
+
+message NormalizerSpec {
+  optional string name = 1;
+  optional string precompiled_charsmap = 2;
+  optional bool add_dummy_prefix = 3 [default = true];
+  optional bool remove_extra_whitespaces = 4 [default = true];
+  optional bool escape_whitespaces = 5 [default = true];
+}
+
+message ModelProto {
+  message SentencePiece {
+    optional string piece = 1;
+    optional float score = 2;
+    enum Type {
+      NORMAL = 1;
+      UNKNOWN = 2;
+      CONTROL = 3;
+      USER_DEFINED = 4;
+      UNUSED = 5;
+      BYTE = 6;
+    }
+    optional Type type = 3 [default = NORMAL];
+  }
+  repeated SentencePiece pieces = 1;
+  optional TrainerSpec trainer_spec = 2;
+  optional NormalizerSpec normalizer_spec = 3;
+}
