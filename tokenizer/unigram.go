@@ -2,7 +2,7 @@ package tokenizer
 
 const negInf = -1e9
 
-// EncodeIDs returns token IDs for the input text.
+// EncodeIDs returns HuggingFace-compatible token IDs for the input text.
 func (t *Tokenizer) EncodeIDs(text string) []int32 {
 	tokens := t.Encode(text)
 	ids := make([]int32, len(tokens))
@@ -80,13 +80,16 @@ func (t *Tokenizer) Encode(text string) []TokenInfo {
 		start := parent[pos]
 		tokenStr := tokenAt[pos]
 
-		id, ok := t.pieces[tokenStr]
+		spIndex, ok := t.pieces[tokenStr]
 		if !ok {
-			id = t.unkID
+			spIndex = 0 // <unk> is at SentencePiece index 0
 		}
 
+		// Convert SentencePiece index to HuggingFace ID
+		hfID := t.spIndexToHFID(spIndex)
+
 		tokens = append(tokens, TokenInfo{
-			ID:    id,
+			ID:    hfID,
 			Text:  tokenStr,
 			Start: start,
 			End:   pos,

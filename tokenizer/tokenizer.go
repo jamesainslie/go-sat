@@ -7,12 +7,21 @@ import (
 )
 
 // Tokenizer implements XLM-RoBERTa compatible SentencePiece Unigram tokenization.
+//
+// Note: Token IDs are remapped from SentencePiece indices to match HuggingFace
+// XLM-RoBERTa convention:
+//   - HF[0] = <s>   (SP[1])
+//   - HF[1] = <pad> (not in SentencePiece)
+//   - HF[2] = </s>  (SP[2])
+//   - HF[3] = <unk> (SP[0])
+//   - HF[n+1] = SP[n] for n >= 3 (normal tokens shifted by 1)
 type Tokenizer struct {
-	pieces      map[string]int32   // token string -> ID
+	pieces      map[string]int32   // token string -> SentencePiece index (internal use)
 	scores      map[string]float32 // token string -> log probability
-	idToPiece   []string           // ID -> token string
+	idToPiece   []string           // SentencePiece index -> token string
 	pieceToType map[string]pb.ModelProto_SentencePiece_Type
 
+	// HuggingFace-compatible token IDs
 	bosID int32
 	padID int32
 	eosID int32
@@ -41,17 +50,18 @@ func New(modelPath string) (*Tokenizer, error) {
 		scores:      make(map[string]float32),
 		idToPiece:   make([]string, len(model.Pieces)),
 		pieceToType: make(map[string]pb.ModelProto_SentencePiece_Type),
-		bosID:       -1,
-		padID:       -1,
-		eosID:       -1,
-		unkID:       -1,
+		// HuggingFace XLM-RoBERTa special token IDs
+		bosID: 0, // <s>
+		padID: 1, // <pad>
+		eosID: 2, // </s>
+		unkID: 3, // <unk>
 	}
 
 	for i, piece := range model.Pieces {
-		id := int32(i)
 		pieceStr := piece.Piece
 
-		t.pieces[pieceStr] = id
+		// Store SentencePiece index for internal Viterbi algorithm
+		t.pieces[pieceStr] = int32(i)
 		t.scores[pieceStr] = piece.Score
 		t.idToPiece[i] = pieceStr
 		t.pieceToType[pieceStr] = piece.Type
@@ -60,24 +70,29 @@ func New(modelPath string) (*Tokenizer, error) {
 		if len(pieceStr) > t.maxTokenLen {
 			t.maxTokenLen = len(pieceStr)
 		}
-
-		// Identify special tokens by checking their type and string
-		switch piece.Type {
-		case pb.ModelProto_SentencePiece_CONTROL:
-			switch pieceStr {
-			case "<s>":
-				t.bosID = id
-			case "</s>":
-				t.eosID = id
-			case "<pad>":
-				t.padID = id
-			}
-		case pb.ModelProto_SentencePiece_UNKNOWN:
-			t.unkID = id
-		}
 	}
 
 	return t, nil
+}
+
+// spIndexToHFID converts a SentencePiece index to a HuggingFace XLM-RoBERTa token ID.
+//
+// Mapping:
+//   - SP[0] (<unk>) -> HF[3]
+//   - SP[1] (<s>)   -> HF[0]
+//   - SP[2] (</s>)  -> HF[2]
+//   - SP[n] (n>=3)  -> HF[n+1] (normal tokens shifted by 1 due to <pad> insertion)
+func (t *Tokenizer) spIndexToHFID(spIndex int32) int32 {
+	switch spIndex {
+	case 0: // <unk>
+		return 3
+	case 1: // <s>
+		return 0
+	case 2: // </s>
+		return 2
+	default: // normal tokens: shift by 1
+		return spIndex + 1
+	}
 }
 
 // Close releases tokenizer resources.
@@ -85,9 +100,10 @@ func (t *Tokenizer) Close() error {
 	return nil
 }
 
-// VocabSize returns the vocabulary size.
+// VocabSize returns the vocabulary size (HuggingFace XLM-RoBERTa compatible: 250002).
+// This is SentencePiece vocab size + 2 (for the inserted <pad> token and the ID shift).
 func (t *Tokenizer) VocabSize() int {
-	return len(t.idToPiece)
+	return len(t.idToPiece) + 2
 }
 
 // BOSID returns the beginning-of-sentence token ID.
